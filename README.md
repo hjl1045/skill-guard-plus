@@ -113,7 +113,7 @@ And it will automatically: download → scan → install (or block).
 
 ## What Gets Detected
 
-Real-world example — the `coding-agent-o10sk4yyb` incident:
+Real-world example — some Skill from ClawHub incident:
 
 ```
 SKILL.md contains:
