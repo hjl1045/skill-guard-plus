@@ -178,4 +178,4 @@ MIT
 
 - [mcp-scan](https://github.com/invariantlabs-ai/mcp-scan) by Invariant Labs (Snyk) — Layer 2 engine
 - Inspired by the [skill-guard](https://github.com/anthropics/skill-guard) project
-- Built with Claude
+
