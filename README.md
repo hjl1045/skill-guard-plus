@@ -51,7 +51,12 @@ Without uv, only Layer 1 runs (still catches most system-level attacks).
 
 ## Usage
 
-### Install a skill from ClawHub
+### Chat with OpenClaw via WhatsApp, Telegram..
+Just say:
+“Help me install skill https://clawhub.ai/RhysSullivan/answeroverflow“
+“Install the Slack skill from ClawHub”
+
+### Manual Install a skill from ClawHub
 
 ```bash
 # Instead of: npx clawhub@latest install steipete/slack
@@ -64,7 +69,7 @@ safe-install-plus.sh steipete/slack --version 1.0.0
 safe-install-plus.sh steipete/slack --force
 ```
 
-### Install from downloaded zip
+### Manual Install from downloaded zip
 
 ```bash
 safe-install-plus.sh --install-zip ~/Downloads/slack-v1.0.0.zip
