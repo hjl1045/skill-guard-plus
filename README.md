@@ -113,12 +113,12 @@ And it will automatically: download → scan → install (or block).
 
 ## What Gets Detected
 
-Real-world example — some Skill from ClawHub incident:
+Real-world example — a malicious skill discovered in the wild:
 
 ```
 SKILL.md contains:
   base64 --decode → bash    ← Layer 1 catches this
-  curl http://91.92.242.30  ← Layer 1 catches this (raw IP)
+  curl http://<redacted IP>  ← Layer 1 catches this (raw IP)
   xattr -c quarantine       ← Layer 1 catches this (Gatekeeper bypass)
   chmod +x                  ← Layer 1 flags this
   
@@ -140,6 +140,18 @@ Set a custom skills directory:
 ```bash
 export OPENCLAW_SKILLS_DIR="$HOME/my-custom-skills-path"
 ```
+
+## Scope
+
+skill-guard-plus works with **any skill source**, not just ClawHub:
+
+- **ClawHub**: `safe-install-plus.sh <slug>` (download + scan + install)
+- **Downloaded zips**: `safe-install-plus.sh --install-zip <path>` (extract + scan + install)
+- **Any local folder/file**: `safe-install-plus.sh --scan-only <path>` (scan only)
+
+Skills from GitHub, email, Slack, or anywhere else can all be scanned before use.
+
+> **Note:** The scanner only protects when you route installs through it. If someone manually copies files into `~/.openclaw/skills/`, the scanner is bypassed. For maximum protection, always use the script or let your agent handle installs (the SKILL.md ensures it does).
 
 ## Limitations
 
