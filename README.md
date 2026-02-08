@@ -53,8 +53,11 @@ Without uv, only Layer 1 runs (still catches most system-level attacks).
 
 ### Chat with OpenClaw via WhatsApp, Telegram..
 Just say:
-“Help me install skill https://clawhub.ai/RhysSullivan/answeroverflow“
-“Install the Slack skill from ClawHub”
+- “Help me install skill https://clawhub.ai/RhysSullivan/answeroverflow“
+- “Install the Slack skill from ClawHub”
+
+It can also help scan check other Skills:
+- "help me scan this https://github.com/axtonliu/smart-illustrator with skill-guard-plus"
 
 ### Manual Install a skill from ClawHub
 
