@@ -29,6 +29,8 @@ SKIP_SCAN=false
 SKIP_MCP=false
 SCAN_ONLY=""
 INSTALL_ZIP=""
+SCAN_CLAUDE=false
+CLAUDE_SKILLS_PATH=""
 STAGING_DIR="/tmp/skill-guard-staging"
 SKILLS_DIR="${OPENCLAW_SKILLS_DIR:-$HOME/.openclaw/skills}"
 CLAWHUB_CMD=""  # Set by check_clawhub(): "npx clawhub@latest" or "clawhub"
@@ -85,6 +87,15 @@ while [[ $# -gt 0 ]]; do
             INSTALL_ZIP="$2"
             shift 2
             ;;
+        --scan-claude)
+            SCAN_CLAUDE=true
+            if [[ $# -gt 1 ]] && [[ ! "$2" =~ ^- ]]; then
+                CLAUDE_SKILLS_PATH="$2"
+                shift 2
+            else
+                shift
+            fi
+            ;;
         --help|-h)
             cat <<'EOF'
 🛡️ skill-guard-plus: Enhanced Secure Skill Installation
@@ -93,6 +104,7 @@ Usage:
   ./safe-install-plus.sh <skill-slug> [options]     # Mode A: from ClawHub
   ./safe-install-plus.sh --install-zip <zip> [options]  # Mode B: from downloaded zip
   ./safe-install-plus.sh --scan-only <path>          # Mode C: scan only
+  ./safe-install-plus.sh --scan-claude [path]        # Mode D: scan Claude Code skills
 
 Mode A — Install from ClawHub (uses npx clawhub@latest):
   ./safe-install-plus.sh steipete/slack
@@ -106,6 +118,10 @@ Mode B — Install from downloaded zip (e.g. ClawHub "Download zip"):
 Mode C — Scan only (no install):
   ./safe-install-plus.sh --scan-only ~/.openclaw/skills/some-skill/
   ./safe-install-plus.sh --scan-only ~/Downloads/SKILL.md
+
+Mode D — Scan Claude Code skills:
+  ./safe-install-plus.sh --scan-claude                    # Auto-detect .claude/skills/
+  ./safe-install-plus.sh --scan-claude /path/to/project   # Scan specific project
 
 Options:
   --version <ver>    Install specific version (Mode A only)
@@ -276,6 +292,35 @@ static_scan_file() {
         ok "No sensitive file references"
     fi
 
+    # Check for OpenClaw / tool-specific config file access
+    # Skills should not need to read the tool's own config (tokens, policies, settings).
+    # This catches attacks that target the host tool's credentials rather than
+    # well-known system files like .ssh or .aws.
+    if grep -inE '(openclaw\.json|clawhub\.json|\.openclaw/|\.clawhub/|config\.json.*token|credentials\.json|\.netrc\b|token\.json|keychain|keyring)' "$file" > /dev/null 2>&1; then
+        warn "References to tool/platform config files (may contain credentials):"
+        grep -inE '(openclaw\.json|clawhub\.json|\.openclaw/|\.clawhub/|config\.json.*token|credentials\.json|\.netrc\b|token\.json|keychain|keyring)' "$file" | head -5 | while read -r line; do
+            echo -e "    ${YELLOW}→ $line${NC}"
+        done
+        ((STATIC_WARNS++))
+    else
+        ok "No tool/platform config references"
+    fi
+
+    # Check for credential-like variable/key names in code
+    # Legitimate skills rarely need to read tokens, secrets, or passwords from
+    # config files. This pattern catches code that extracts credential values
+    # even if the file path itself isn't in the sensitive-files list.
+    # Scoped to assignment/access patterns to reduce false positives from docs or comments.
+    if grep -inE '([\"\x27])(bot_?token|api_?key|api_?secret|auth_?token|access_?token|refresh_?token|client_?secret|private_?key|secret_?key|password|passwd|dm_?policy)\1' "$file" > /dev/null 2>&1; then
+        warn "Code references credential-like keys (token/secret/password):"
+        grep -inE '([\"\x27])(bot_?token|api_?key|api_?secret|auth_?token|access_?token|refresh_?token|client_?secret|private_?key|secret_?key|password|passwd|dm_?policy)\1' "$file" | head -5 | while read -r line; do
+            echo -e "    ${YELLOW}→ $line${NC}"
+        done
+        ((STATIC_WARNS++))
+    else
+        ok "No credential-like key references"
+    fi
+
     if grep -inE '(curl.*(-X\s*POST|-d\s)|curl.*--data|\bnc\s+-|\bnetcat\b|\bncat\b)' "$file" > /dev/null 2>&1; then
         alert "Data exfiltration patterns (POST/netcat):"
         grep -inE '(curl.*(-X\s*POST|-d\s)|curl.*--data|\bnc\s+-|\bnetcat\b|\bncat\b)' "$file" | while read -r line; do
@@ -284,6 +329,20 @@ static_scan_file() {
         ((STATIC_ALERTS++)); ((file_issues++))
     else
         ok "No data exfiltration patterns"
+    fi
+
+    # Check for sensitive data embedded in output (covert exfiltration)
+    # Instead of sending data over the network, an attacker can embed secrets
+    # in the skill's normal output — HTML comments, log lines, filenames, etc.
+    # The stolen data then leaves the system when the user shares the output.
+    if grep -inE '(<!--.*\{|<!--.*\$|<!--.*token|<!--.*secret|<!--.*key|f["\x27].*<!--.*\{|\.format\(.*token|\.format\(.*secret|%s.*token)' "$file" > /dev/null 2>&1; then
+        warn "Possible data embedding in HTML comments or formatted output:"
+        grep -inE '(<!--.*\{|<!--.*\$|<!--.*token|<!--.*secret|<!--.*key|f["\x27].*<!--.*\{|\.format\(.*token|\.format\(.*secret|%s.*token)' "$file" | head -5 | while read -r line; do
+            echo -e "    ${YELLOW}→ $line${NC}"
+        done
+        ((STATIC_WARNS++))
+    else
+        ok "No suspicious data embedding patterns"
     fi
 
     # ── 5: Prompt Injection / Hidden Commands ──
@@ -551,7 +610,7 @@ cleanup() {
 print_banner() {
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║${NC}  ${BOLD}🛡️ skill-guard-plus v1.0${NC}                            ${BLUE}║${NC}"
+    echo -e "${BLUE}║${NC}  ${BOLD}🛡️ skill-guard-plus v1.1${NC}                            ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  ${BOLD}   Enhanced Secure Skill Installation${NC}                ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}                                                      ${BLUE}║${NC}"
     echo -e "${BLUE}║${NC}  Layer 1: Static pattern scan (macOS supply chain attacks)      ${BLUE}║${NC}"
@@ -559,6 +618,123 @@ print_banner() {
     echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
+
+# ── Scan Claude Code skills mode ──
+if [[ "$SCAN_CLAUDE" == "true" ]]; then
+    print_banner
+    echo -e "${BOLD}🔍 Scanning Claude Code skills...${NC}"
+    echo ""
+
+    # Build list of .claude/skills/ directories to scan
+    claude_dirs=()
+
+    if [[ -n "$CLAUDE_SKILLS_PATH" ]]; then
+        # User specified a path — look for .claude/skills/ inside it
+        if [[ -d "$CLAUDE_SKILLS_PATH/.claude/skills" ]]; then
+            claude_dirs+=("$CLAUDE_SKILLS_PATH/.claude/skills")
+        elif [[ -d "$CLAUDE_SKILLS_PATH" ]]; then
+            # Maybe they pointed directly at a .claude/skills dir or a single skill
+            claude_dirs+=("$CLAUDE_SKILLS_PATH")
+        else
+            print_error "Path not found: $CLAUDE_SKILLS_PATH"
+            exit 1
+        fi
+    else
+        # Auto-detect: check common locations
+        # 1. Current directory's .claude/skills/
+        if [[ -d "./.claude/skills" ]]; then
+            claude_dirs+=("$(pwd)/.claude/skills")
+        fi
+        # 2. Home directory ~/.claude/skills/ (global Claude Code skills)
+        if [[ -d "$HOME/.claude/skills" ]]; then
+            claude_dirs+=("$HOME/.claude/skills")
+        fi
+        # 3. Also check OpenClaw skills for completeness
+        if [[ -d "$SKILLS_DIR" ]]; then
+            claude_dirs+=("$SKILLS_DIR")
+        fi
+    fi
+
+    if [[ ${#claude_dirs[@]} -eq 0 ]]; then
+        print_error "No Claude Code skills directories found"
+        print_info "Try: $0 --scan-claude /path/to/your/project"
+        exit 1
+    fi
+
+    total_skills=0
+    total_alerts=0
+    total_warns=0
+    failed_skills=()
+
+    for skills_root in "${claude_dirs[@]}"; do
+        echo ""
+        echo -e "${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║${NC}  📂 ${BOLD}$skills_root${NC}"
+        echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
+
+        for skill_dir in "$skills_root"/*/; do
+            [[ ! -d "$skill_dir" ]] && continue
+            skill_name=$(basename "$skill_dir")
+
+            # Skip scanning ourselves
+            if [[ "$skill_name" == "skill-guard-plus" ]]; then
+                echo ""
+                print_info "Skipping self: $skill_name"
+                continue
+            fi
+
+            total_skills=$((total_skills + 1))
+
+            # Reset counters for each skill
+            STATIC_ALERTS=0
+            STATIC_WARNS=0
+            STATIC_SCANNED=0
+
+            echo ""
+            echo -e "${BOLD}========== Scanning: $skill_name ==========${NC}"
+
+            skill_issues=0
+            run_static_scan "$skill_dir" || skill_issues=$?
+
+            if [[ "$SKIP_MCP" != "true" ]]; then
+                run_mcp_scan "$skill_dir" || skill_issues=$((skill_issues + $?))
+            fi
+
+            total_alerts=$((total_alerts + STATIC_ALERTS))
+            total_warns=$((total_warns + STATIC_WARNS))
+
+            if [[ $STATIC_ALERTS -gt 0 ]]; then
+                failed_skills+=("$skill_name")
+            fi
+        done
+    done
+
+    # Summary
+    echo ""
+    echo -e "${BLUE}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║  ${BOLD}📋 Claude Skills Scan Summary${NC}              ${BLUE}║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  Skills scanned: ${BOLD}$total_skills${NC}"
+    if [[ $total_alerts -gt 0 ]]; then
+        echo -e "  ${RED}🚨 Critical alerts: $total_alerts${NC}"
+    fi
+    if [[ $total_warns -gt 0 ]]; then
+        echo -e "  ${YELLOW}⚠️  Warnings: $total_warns${NC}"
+    fi
+    if [[ ${#failed_skills[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "  ${RED}Skills with critical issues:${NC}"
+        for s in "${failed_skills[@]}"; do
+            echo -e "    ${RED}⛔ $s${NC}"
+        done
+        echo ""
+        exit 2
+    else
+        echo -e "  ${GREEN}${BOLD}✅ All skills passed${NC}"
+        exit 0
+    fi
+fi
 
 # ── Scan-only mode ──
 if [[ -n "$SCAN_ONLY" ]]; then
@@ -584,8 +760,13 @@ if [[ -n "$SCAN_ONLY" ]]; then
     echo -e "${BLUE}╚══════════════════════════════════════════════════════╝${NC}"
 
     if [[ $static_issues -gt 0 ]] || [[ $mcp_issues -gt 0 ]]; then
-        echo -e "  ${RED}${BOLD}⛔ Issues detected — review before using this skill${NC}"
+        echo -e "  ${RED}${BOLD}⛔ Critical issues detected — review before using this skill${NC}"
         exit 2
+    elif [[ $STATIC_WARNS -gt 0 ]]; then
+        echo -e "  ${YELLOW}${BOLD}⚠️  ${STATIC_WARNS} warning(s) found — review recommended${NC}"
+        echo -e "  Warnings don't block installation but may indicate risky behavior."
+        echo -e "  Ask the agent to explain what these warnings mean in context."
+        exit 0
     else
         echo -e "  ${GREEN}${BOLD}✅ All clear — skill appears safe${NC}"
         exit 0

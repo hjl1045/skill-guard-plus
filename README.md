@@ -1,8 +1,21 @@
-# 🛡️ skill-guard-plus
+# 🛡️ skill-guard-plus v1.1
 
-**Two-layer security scanner for OpenClaw / ClawHub skills.**
+**Two-layer security scanner for OpenClaw / ClawHub and Claude Code skills.**
 
 Scans skills before installation to detect prompt injections, malware payloads, macOS supply chain attacks, data exfiltration, and more.
+
+## Changelog
+
+**v1.1**
+- **Claude Code Support**: Added `--scan-claude` flag to batch-audit Claude Code skills (`.claude/skills/`).
+- **Enhanced Credential Detection**: Now detects extraction of credential-like variable/keys (token, secret, password) even outside of sensitive files.
+- **Covert Exfiltration Detection**: Added checks for sensitive data embedding (like tokens/secrets) within HTML comments or formatted output.
+
+**v1.0**
+- Initial release.
+- **Layer 1**: Static pattern matching for macOS supply chain attacks, `curl|bash` chains, base64 obfuscation, Gatekeeper bypass, LaunchAgent persistence, credential access, data exfiltration, and hidden characters.
+- **Layer 2**: Integration with mcp-scan (Invariant/Snyk) for semantic prompt injection, tool poisoning, cross-origin escalation, and rug pulls.
+- **Features**: Support for OpenClaw / ClawHub skills installation, local file scanning, and ZIP file extraction audits.
 
 ## The Problem
 
@@ -21,7 +34,7 @@ Two complementary scan layers:
 
 | Layer | Engine | Catches |
 |-------|--------|---------|
-| **Layer 1** | Static pattern matching | `curl\|bash` chains, base64 obfuscation, macOS Gatekeeper bypass (`xattr -c`), LaunchAgent persistence, credential access, data exfiltration, hidden characters |
+| **Layer 1** | Static pattern matching | `curl\|bash` chains, base64 obfuscation, macOS Gatekeeper bypass (`xattr -c`), LaunchAgent persistence, credential access, credential-like key extraction, data exfiltration, covert data embedding, hidden characters |
 | **Layer 2** | mcp-scan (Invariant/Snyk) | Semantic prompt injection, tool poisoning, cross-origin escalation, rug pulls |
 
 Either layer flagging a critical issue blocks the install.
@@ -80,6 +93,7 @@ safe-install-plus.sh --install-zip ~/Downloads/slack-v1.0.0.zip
 
 ### Scan existing skills (audit)
 
+**Scan OpenClaw skills:**
 ```bash
 # Scan one skill
 safe-install-plus.sh --scan-only ~/.openclaw/skills/some-skill/
@@ -88,6 +102,15 @@ safe-install-plus.sh --scan-only ~/.openclaw/skills/some-skill/
 for d in ~/.openclaw/skills/*/; do
     safe-install-plus.sh --scan-only "$d"
 done
+```
+
+**Scan Claude Code skills:**
+```bash
+# Scan a specific project
+safe-install-plus.sh --scan-claude /path/to/project
+
+# Auto-detect Claude skills in current dir or globally
+safe-install-plus.sh --scan-claude
 ```
 
 ### Options
@@ -99,6 +122,7 @@ done
 --skip-scan        Skip ALL scans (not recommended)
 --install-zip <f>  Install from zip file
 --scan-only <path> Scan without installing
+--scan-claude      Scan Claude Code skills (.claude/skills/)
 ```
 
 ## Exit Codes

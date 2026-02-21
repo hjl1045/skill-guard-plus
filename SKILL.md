@@ -1,6 +1,6 @@
 ---
 name: skill-guard-plus
-description: MANDATORY security gate for installing ClawHub skills. Whenever the user asks to install, add, or download a skill from ClawHub, ALWAYS use this skill's safe-install-plus.sh instead of running clawhub install directly. Also use when the user asks to scan, audit, or check existing skills for security issues. Detects prompt injections, malware payloads, macOS supply chain attacks, data exfiltration, and Gatekeeper bypass attempts.
+description: Security scanner for ClawHub and Claude Code skills. Scans skills before installation to detect prompt injections, malware payloads, macOS supply chain attacks, data exfiltration, and more. Also audits existing installed skills (both OpenClaw and Claude Code/.claude/skills/).
 ---
 
 # skill-guard-plus — Agent Instructions
@@ -14,20 +14,25 @@ Use this skill when the user says any of the following:
 - "add xxx skill" / "download xxx from ClawHub" (e.g. "从 ClawHub 下载 xxx")
 - "check if this skill is safe" (e.g. "帮我扫描一下这个 skill")
 - "scan my existing skills" (e.g. "审计一下我已装的 skills")
+- "scan my claude skills" (e.g. "扫描一下我的 Claude skills")
 - Any request involving `clawhub install`
 
 ## Script Location
 
-The scanner script is located in this skill's directory:
+The scanner script can be in either location (check which exists):
 
-```
-~/.openclaw/skills/skill-guard-plus/safe-install-plus.sh
-```
-
-Refer to it using the variable:
 ```bash
+# In Claude Code project skills (preferred when running inside a project)
+GUARD_SCRIPT=".claude/skills/skill-guard-plus/safe-install-plus.sh"
+
+# In OpenClaw global install
 GUARD_SCRIPT="$HOME/.openclaw/skills/skill-guard-plus/safe-install-plus.sh"
+
+# Or via symlink
+GUARD_SCRIPT="$HOME/.local/bin/safe-install-plus.sh"
 ```
+
+Use whichever path exists. Prefer the project-local `.claude/skills/` path when available.
 
 ## Core Workflow
 
@@ -114,6 +119,31 @@ done
 bash "$HOME/.openclaw/skills/skill-guard-plus/safe-install-plus.sh" --scan-only <path-to-file>
 ```
 
+### Task B2: Scan Claude Code Skills
+
+When the user asks to scan/audit their Claude Code skills (`.claude/skills/` directory):
+
+**Scan all Claude Code skills in a project:**
+```bash
+bash ".claude/skills/skill-guard-plus/safe-install-plus.sh" --scan-claude /path/to/project --skip-mcp
+```
+
+**Scan all Claude Code skills (auto-detect from current directory + home):**
+```bash
+bash ".claude/skills/skill-guard-plus/safe-install-plus.sh" --scan-claude --skip-mcp
+```
+
+**Scan a single Claude Code skill:**
+```bash
+bash ".claude/skills/skill-guard-plus/safe-install-plus.sh" --scan-only .claude/skills/<skill-name>/ --skip-mcp
+```
+
+The `--scan-claude` flag will:
+1. Auto-discover `.claude/skills/` directories (current project, home dir, and OpenClaw)
+2. Iterate through all skills (skipping skill-guard-plus itself)
+3. Run Layer 1 static scan on each skill
+4. Print a summary with total alerts/warnings and list any failed skills
+
 ### Task C: First-Time Setup / Dependency Check
 
 If the script fails because of missing dependencies, help the user install them:
@@ -142,7 +172,10 @@ Note: The script supports both `npx clawhub@latest` (official, preferred) and gl
 - `xattr -c quarantine` macOS Gatekeeper bypass
 - LaunchAgent/LaunchDaemon persistence mechanisms
 - Credential file access (.ssh, .aws, .env, API keys)
+- Tool/platform config file access (openclaw.json, credentials.json, token.json, keychain, .netrc)
+- Credential-like key names in code (botToken, apiKey, apiSecret, clientSecret, password, etc.)
 - Data exfiltration via POST/netcat
+- Covert data embedding in output (secrets hidden in HTML comments, formatted strings)
 - Commands hidden in HTML comments
 - Prompt injection keywords
 - Binary executable references (.exe, .dylib, .so, .mach-o)
@@ -163,12 +196,56 @@ Note: The script supports both `npx clawhub@latest` (official, preferred) and gl
 5. **When in doubt, err on the side of caution** — better to block a safe skill than install a malicious one
 6. **Report results in English**
 
+## Interpreting Scan Results
+
+The scanner outputs raw alerts and warnings — but the agent's job is to **interpret them
+in context**, not just relay them. Individual warnings may look harmless, but certain
+combinations form attack chains that are far more dangerous than any single warning alone.
+
+### Warning Chain Analysis
+
+After a scan completes, look at the warnings as a group and check for these patterns:
+
+**Credential Theft Chain** (high risk — recommend NOT installing):
+- Config/credential file access + credential key extraction + data embedding in output
+- Example: reads `openclaw.json` → extracts `botToken` → embeds in HTML comment
+- This is a classic exfiltration pattern: the stolen data leaves the system when the
+  user copies, shares, or publishes the skill's output.
+
+**Stealth Persistence Chain** (high risk):
+- System directory references + chmod +x + crontab/LaunchAgent
+- The skill installs something and makes it survive reboots.
+
+**Download-and-Execute Chain** (critical — scanner already flags this as ALERT):
+- curl/wget + base64 decode + eval/exec
+- Already caught by Layer 1 as CRITICAL, but if any of these appear as separate
+  warnings, treat the combination as critical too.
+
+### How to Present Findings
+
+When warnings are detected, the agent should:
+
+1. **List each warning** with the specific flagged line(s)
+2. **Explain what each warning means** in plain language (e.g., "This code reads the
+   OpenClaw config file which contains your bot token")
+3. **Identify chains** — if multiple warnings form one of the patterns above, explicitly
+   call it out: "These three warnings together form a credential theft chain"
+4. **Give a clear recommendation**: "I recommend NOT installing this skill because..."
+   or "These warnings appear benign in context because..."
+5. **Never say "All clear" if there are warnings** — even if the script exits 0, the
+   agent should present warnings with context and let the user decide
+
+The goal: the user should understand *what the code does* and *why it's risky*,
+not just see a list of yellow flags they have to interpret themselves.
+
 ## Common User Queries
 
 - "install xxx skill" → Task A (install with scan via clawhub)
 - "install xxx" → Task A
 - "I downloaded a zip" / "install this zip" → Task A2 (install from zip)
 - "is this skill safe?" → Task B (scan only)
-- "scan all my skills" → Task B (batch audit)
+- "scan all my skills" → Task B (batch audit for OpenClaw) or Task B2 (Claude Code skills)
+- "scan my claude skills" / "扫描一下我的 Claude skills" → Task B2
+- "audit this project's skills" → Task B2 with project path
 - "clawhub install xxx" / "npx clawhub@latest install xxx" → Intercept! Use Task A instead
 - "why can't I install?" → Check Task C (dependencies)
