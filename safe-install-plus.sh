@@ -400,8 +400,13 @@ static_scan_file() {
     fi
 
     # Check for non-printable characters (exclude valid UTF-8 multibyte like CJK)
-    local nonprint_count=0
+    local nonprint_count
     nonprint_count=$(grep -cP '[\x00-\x08\x0E-\x1F\x7F]' "$file" 2>/dev/null || true)
+    # grep -c may return empty on some grep builds/files; normalize to integer
+    if [[ ! "$nonprint_count" =~ ^[0-9]+$ ]]; then
+        nonprint_count=0
+    fi
+
     if [ "$nonprint_count" -gt 0 ]; then
         alert "Found ${nonprint_count} lines with non-printable characters"
         ((STATIC_ALERTS++)); ((file_issues++))
